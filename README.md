@@ -17,7 +17,7 @@ This process allows you to quickly replicate an Agent's setup to a new server, p
 
 ## 🚀 Two-Script Approach
 
-This repository provides **two separate scripts** to eliminate complexity and ensure each user gets exactly what they need:
+This repository provides **two separate scripts** to reduce complexity:
 
 ### Choose Your Script:
 
@@ -56,7 +56,7 @@ This repository provides **two separate scripts** to eliminate complexity and en
 ### 1. Gather Information
 
 You'll need:
-- Your Alation instance URL (e.g., `https://yourcompany.alationcloud.com`)
+- Your Alation instance URL (e.g., `https://yourBaseUrl.alationcloud.com`)
 - Authentication credentials (username/password OR SSO tokens)
 - The Alation-assigned Agent ID (found in the agent's URL in Alation UI)
 
@@ -98,7 +98,7 @@ python3 -c "import requests, toml; print('Python libraries installed successfull
 1. **Download the script** to your new server
 2. **Edit the configuration** section:
 ```python
-BASE_URL = "https://yourcompany.alationcloud.com"
+BASE_URL = "https://yourBaseUrl.alationcloud.com"
 USERNAME = "your-admin-username"
 PASSWORD = "your-admin-password"
 agent_id = 1  # Your agent identifier
@@ -114,7 +114,7 @@ agent_id = 1  # Your agent identifier
 2. **Download the script** to your new server
 3. **Edit the configuration** section:
 ```python
-BASE_URL = "https://yourcompany.alationcloud.com"
+BASE_URL = "https://yourBaseUrl.alationcloud.com"
 REFRESH_TOKEN = "your-refresh-token-here"
 API_ACCESS_TOKEN = "your-api-access-token-here"
 agent_id = 1  # Your agent identifier
