@@ -1,241 +1,196 @@
-# Alation Agent Re-Setup Scripts
+# Alation Agent Rebuild Scripts
 
-This repository contains Python scripts to automate the installation and configuration of Alation Agents on new servers. These scripts use the Alation Agent APIs to download, install, and configure an Alation Agent, connect it to Alation Cloud, and reinstall its connectors.
+This repository provides solutions for **reinstalling and configuring Alation Agents** on new systems. Choose between complete rebuild (from scratch) or partial rebuild (two-phase approach) based on your specific needs.
 
-## 📋 Overview
+## Repository Overview
 
-This process allows you to quickly replicate an Agent's setup to a new server, providing flexibility for maintenance, scaling, or disaster recovery scenarios.
+The Alation Agent is not built in a highly available (HA) manner, which can create concerns about single points of failure for Alation Cloud customers. These scripts help you quickly set up agents on new servers for various scenarios including disaster recovery, server migration, and testing.
 
-## ⚠️ Critical Prerequisites
+## Choose Your Approach
 
-> **Before beginning the agent rebuild process on the new server, the original agent server must be shut down or taken offline.** Having both the old and new agent online simultaneously will prevent proper connector installation and configuration transfer.
+| Method | Time | Description | Complexity |
+|--------|------|-------------|------------|
+| **[Complete Rebuild](complete-rebuild/)** | 3-5 minutes | Single script handles everything from download to activation | Low |
+| **[Partial Rebuild](partial-rebuild/)** | 3-5 minutes* | Two-phase approach: prepare system once, activate when needed | Medium |
 
-### Key Considerations
-- The Agent itself is stateless - all configurations are maintained within Alation
-- **Agent ID Conflict**: Only one agent per Agent ID can be active at a time
-- The original agent must be offline before setting up the replacement
+*Requires 3-5 minute preparation phase run once
 
-## 🚀 Two-Script Approach
+## Architecture Comparison
 
-This repository provides **two separate scripts** to reduce complexity:
+### Complete Rebuild (Single Phase)
+```
+┌─────────────────────────────────────┐
+│ ✅ Download, Install, Configure     │  
+│ ✅ Certificates, Connect, Sync      │  ── 3-5 minutes
+│ ✅ Everything in one execution      │
+└─────────────────────────────────────┘
+```
 
-### Choose Your Script:
+### Partial Rebuild (Two Phase)
+```
+Phase 1: Prepare (Run Once)    Phase 2: Activate (When Needed)
+┌─────────────────┐             ┌─────────────────┐
+│ ✅ Download     │ ── 3-5 min  │ ✅ Configure    │ ── 3-5 min
+│ ✅ Install      │             │ ✅ Certificates │
+│ 💤 Dormant      │             │ ✅ Connect      │
+└─────────────────┘             └─────────────────┘
+```
 
-| Authentication Method | Script to Use | Configuration Required |
-|----------------------|---------------|----------------------|
-| **Username/Password** | `agent-rebuild-core.py` | BASE_URL, USERNAME, PASSWORD, agent_id |
-| **SSO (SAML, OIDC, etc.)** | `agent-rebuild-sso.py` | BASE_URL, REFRESH_TOKEN, API_ACCESS_TOKEN, agent_id |
+## Authentication Methods
 
-## 📁 Script Selection Guide
+Both approaches support two authentication methods:
 
-### Use `agent-rebuild-core.py` if:
-- You use username/password authentication
-- You log into Alation directly (not through SSO)
-- You can provide Server Admin credentials
+| Authentication | When to Use | Requirements |
+|---------------|-------------|--------------|
+| **Username/Password** | Direct Alation login | Server Admin credentials |
+| **SSO** | SAML, OIDC, etc. | Pre-generated tokens from Alation UI |
 
-### Use `agent-rebuild-sso.py` if:
-- You use SSO authentication (SAML, OIDC, etc.)
-- You cannot provide username/password directly
-- You can generate tokens through the Alation UI
-
-## 🔧 Prerequisites
+## Prerequisites
 
 ### System Requirements
-- **Alation Cloud Service Instance** (on-premise instances don't need agents)
-- **Server Admin access** in Alation
-- **Linux server** that can access all required data sources
-- **Python 3.7+** with `requests` and `toml` libraries
-- **Network access** to the same data sources as the original agent
+- **Alation Cloud Service** instance (on-premise instances don't need agents)
+- **Linux Distribution**: Debian/Ubuntu or RHEL/CentOS
+- **Python 3.7+**: With `requests` and `toml` libraries
+- **Docker**: Must be installed and running (installed as part of Agent setup)
+- **Sudo Access**: Required for system-level operations
 
-### Authentication Requirements
-- **For Manual Login**: Server Admin username and password
-- **For SSO Users**: Pre-generated refresh token and API access token from Alation UI
+### Alation Requirements  
+- **Server Admin** privileges in Alation
+- **Network Access**: Connectivity to Alation instance and data sources
+- **Agent ID**: Know which agent you're rebuilding
 
-## 📝 Setup Instructions
-
-### 1. Gather Information
-
-You'll need:
-- Your Alation instance URL (e.g., `https://yourBaseUrl.alationcloud.com`)
-- Authentication credentials (username/password OR SSO tokens)
-- The Alation-assigned Agent ID (found in the agent's URL in Alation UI)
-
-### 2. Prepare the New Server
-
-#### 2.1. Connect to the Linux Server
-```bash
-# SSH or use Systems Manager Session Manager
-ssh user@your-new-server.com
-```
-
-#### 2.2. Update System and Install Python
-```bash
-# For RHEL/CentOS/Amazon Linux
-sudo dnf update -y
-sudo dnf install -y python3 python3-pip
-
-# For Debian/Ubuntu
-sudo apt-get update
-sudo apt-get install -y python3 python3-pip
-```
-
-#### 2.3. Install Required Python Libraries
+### Install Dependencies
 ```bash
 pip3 install requests toml
 ```
 
-#### 2.4. Verify Installation
+## Quick Start
+
+### Option 1: Complete Rebuild
+Perfect for fresh installations and one-time recovery:
 ```bash
-python3 -c "import requests, toml; print('Python libraries installed successfully')"
+cd complete-rebuild/
+# Edit configuration in rebuild-core.py or rebuild-sso.py
+python3 rebuild-core.py  # or rebuild-sso.py
 ```
 
-> 💡 **Note**: Docker installation is not required as a prerequisite. The Alation Agent installation process will automatically install and configure Docker.
-
-### 3. Configure Your Script
-
-#### For Manual Login Users (`agent-rebuild-core.py`)
-
-1. **Download the script** to your new server
-2. **Edit the configuration** section:
-```python
-BASE_URL = "https://yourBaseUrl.alationcloud.com"
-USERNAME = "your-admin-username"
-PASSWORD = "your-admin-password"
-agent_id = 1  # Your agent identifier
-```
-
-#### For SSO Users (`agent-rebuild-sso.py`)
-
-1. **Generate tokens** from Alation UI:
-   - Log into your Alation instance through your browser
-   - Navigate to your user profile settings
-   - Generate a Refresh Token and API Access Token
-
-2. **Download the script** to your new server
-3. **Edit the configuration** section:
-```python
-BASE_URL = "https://yourBaseUrl.alationcloud.com"
-REFRESH_TOKEN = "your-refresh-token-here"
-API_ACCESS_TOKEN = "your-api-access-token-here"
-agent_id = 1  # Your agent identifier
-```
-
-### 4. Execute the Script
-
-#### 4.1. Make the Script Executable
+### Option 2: Partial Rebuild  
+Ideal for speed-critical scenarios:
 ```bash
-chmod +x agent-rebuild-core.py
-# OR
-chmod +x agent-rebuild-sso.py
+cd partial-rebuild/
+# Phase 1: Prepare system (run once)
+python3 prepare-core.py  # or prepare-sso.py
+
+# Phase 2: Activate when needed (run during recovery)  
+python3 activate-core.py  # or activate-sso.py
 ```
 
-#### 4.2. Run the Script
-```bash
-python3 agent-rebuild-core.py
-# OR
-python3 agent-rebuild-sso.py
+## Critical Prerequisites
+
+> **IMPORTANT**: Before rebuilding an agent, ensure the existing agent with the same Agent ID is completely shut down. Having multiple agents with the same ID online simultaneously will cause conflicts.
+
+### Agent ID Conflict Prevention
+- **Only one agent per Agent ID** can be active at a time
+- **Shut down existing agent** before activating replacement
+- **Verify agent is offline** before proceeding with rebuild
+
+## Feature Comparison
+
+| Feature | Complete Rebuild | Partial Rebuild |
+|---------|------------------|-----------------|
+| **Setup Time** | 3-5 minutes | 3-5 minutes* |
+| **Preparation** | None required | 3 minutes once |
+| **Complexity** | Single script | Two-phase process |
+
+*After initial preparation phase
+
+## Security Features
+
+### Authentication Options
+- **Manual Login**: Temporary token generation with automatic revocation
+- **SSO**: External token management (tokens not revoked by scripts)
+
+### Security Validation
+- **SHA256 checksum verification** for all downloaded packages
+- **Certificate-based agent authentication**
+- **Secure temporary file handling**
+- **Package source validation** from official Alation endpoints
+
+### Optional Authentication Service
+Both approaches support optional installation of the Authentication Service for:
+- Kerberos authentication
+- LDAP integration  
+- Complex authentication workflows
+
+## Testing and Validation
+
+### Safe Testing Approach
+1. **Test on non-production** Alation instances and datasources first
+2. **Document recovery times** for your specific setup
+
+### Validation Steps
+After completion, verify:
+- Agent connectivity in Alation UI
+- Data source connections work
+- Docker containers are running
+- Service status is healthy
+
+## Troubleshooting
+
+### Common Issues
+- **Authentication errors**: Verify credentials and Server Admin privileges
+- **Network connectivity**: Check firewall rules
+- **Installation failures**: Verify disk space and sudo access
+- **Agent conflicts**: Ensure no duplicate Agent IDs are active
+
+### Log Analysis
+Both approaches provide detailed colored logging:
+- **Blue**: Info and progress messages
+- **Yellow**: Warning messages
+- **Red**: Error messages
+
+## Directory Structure
+
+```
+agent-rebuild/
+├── README.md                  # This overview and decision guide
+├── CLAUDE.md                  # Development guidance  
+├── complete-rebuild/          # Single-phase rebuild (3-5 min)
+│   ├── README.md             # Complete rebuild guide
+│   ├── rebuild-core.py       # Username/password version
+│   └── rebuild-sso.py        # SSO version
+└── partial-rebuild/           # Two-phase rebuild (3-5 min activation)
+    ├── README.md             # Partial rebuild guide  
+    ├── prepare-core.py       # Phase 1: Manual login
+    ├── prepare-sso.py        # Phase 1: SSO
+    ├── activate-core.py      # Phase 2: Manual login
+    └── activate-sso.py       # Phase 2: SSO
 ```
 
-**Execution Time**: Approximately 2-3 minutes. The script provides detailed colored logging throughout the process.
+## Common Use Cases
 
-## 📊 What the Scripts Do
+Both approaches support all scenarios including:
+- **Disaster Recovery**: Agent replacement during outages
+- **Server Migration**: Moving agents to new infrastructure  
+- **Testing & Development**: Setting up temporary or test environments
+- **Maintenance**: OS upgrades or system updates
+- **Learning**: Understanding agent setup and configuration
 
-### API Workflow (Both Scripts)
-The scripts use these Alation APIs in sequence:
+## Success Metrics
 
-1. **Authentication** (differs between scripts)
-   - Manual: `POST /integration/v1/createRefreshToken/` → `POST /integration/v1/createAPIAccessToken/`
-   - SSO: Uses pre-generated tokens
+Track these metrics to validate your chosen approach:
+- **Recovery Time Objective (RTO)**: How fast can you rebuild?
+- **Recovery Point Objective (RPO)**: How much data/config loss is acceptable?
+- **Mean Time to Recovery (MTTR)**: Average time for successful rebuild
+- **Success Rate**: Percentage of successful rebuilds
 
-2. **Agent Installation**
-   - `GET /integration/v1/agent/installers/{flavor}/` - Get installer info
-   - `GET /integration/v1/agent/installers/{flavor}/latest/` - Download installer
-   - Install packages using system package manager
+## Additional Resources
 
-3. **Agent Configuration**
-   - `GET /integration/v1/agent/endpoint/` - Get connectivity endpoint
-   - Update agent configuration files
-   - `POST /integration/v1/agent/{agent_id}/sign_certificate/` - Generate certificates
+- **[Complete Rebuild Guide](complete-rebuild/README.md)**: Comprehensive single-phase approach
+- **[Partial Rebuild Guide](partial-rebuild/README.md)**: Fast two-phase approach
+- **[Alation Developer Portal](https://developer.alation.com/dev/recipes/agent-re-setup)**: Official documentation
+- **[Agent APIs Documentation](https://developer.alation.com/dev/reference/listagents)**: API reference
 
-4. **Service Installation**
-   - `GET /integration/v1/agent/addons/auth/` - Get auth service info
-   - `GET /integration/v1/agent/addons/auth/latest/` - Download auth service
-   - Install authentication service
+## Disclaimer
 
-5. **Agent Activation**
-   - `GET /integration/v1/agent/{agent_id}/` - Check connection status
-   - `POST /integration/v1/agent/{agent_id}/resync/` - Resync connectors
-   - `GET /api/v1/bulk_metadata/job/` - Monitor resync progress
-
-6. **Cleanup**
-   - Manual: `POST /integration/v1/revokeAPIAccessTokens/` - Revoke tokens
-   - SSO: No token revocation (managed externally)
-
-### Security Features
-- **SHA256 checksum validation** for all downloaded packages
-- **Temporary file handling** with secure cleanup
-- **Certificate-based authentication** for agent communication
-- **Automatic token revocation** (manual login only)
-- **Package cleanup** on installation failure
-
-## ✅ Validation Steps
-
-### 5.1. Check Docker Containers
-```bash
-sudo docker ps
-```
-
-Expected output should show containers for:
-- `agent` - Main agent container
-- `proxy` - Reverse proxy
-- `application_gateway` - Application gateway
-- `auth` - Authentication service
-- `connector_*` - One container per connector
-
-### 5.2. Test Connection in Alation
-1. Open Alation → **Data Sources**
-2. Select a data source that uses the agent
-3. Click **ellipses** (⋮) → **Settings**
-4. Click **General Settings** → **Test Connection**
-
-> 💡 **Tip**: Test multiple data sources to ensure all connectors are working properly.
-
-## 🧹 Cleanup
-
-After validating the new agent, secure your credentials:
-
-### Option 1: Secure File Deletion
-```bash
-# Overwrite file with random data
-sudo shred -vfz -n 3 agent-rebuild-*.py
-# Remove the file
-rm agent-rebuild-*.py
-```
-
-### Option 2: Simple Deletion
-```bash
-rm agent-rebuild-*.py
-```
-
-### Option 3: Remove Credentials Only
-```bash
-# Edit the file to replace credentials with placeholders
-nano agent-rebuild-*.py
-
-# Replace actual values with:
-BASE_URL = "<AlationInstanceURL>"
-USERNAME = "<AlationServerAdminUserName>"
-PASSWORD = "<AlationServerAdminPassword>"
-# OR for SSO
-REFRESH_TOKEN = "<YourRefreshToken>"
-API_ACCESS_TOKEN = "<YourAPIAccessToken>"
-```
-
-## 📚 Additional Resources
-
-- [Alation Developer Portal](https://developer.alation.com/dev/recipes/agent-re-setup)
-- [Agent APIs Documentation](https://developer.alation.com/dev/reference/listagents)
-
-## ⚖️ Disclaimer
-
-> **Important**: This code is provided as an example and is not intended for use on production Alation instances without thorough review and testing. Alation does not provide support for this code, and it is not covered by the Alation subscription and its associated support agreement. Alation is not responsible for any harm it may cause, including the unrecoverable corruption of a catalog instance.
+> **Important**: This code is provided as an example and without warranty, and should only be used on **non-production** Alation instances first. Alation does not provide support for this code, and it is not covered by standard support agreements. Users are responsible for testing and validating in their specific environments.

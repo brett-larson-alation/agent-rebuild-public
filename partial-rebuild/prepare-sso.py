@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
 ##########################################################################################
-# Name: Agent Re-Setup (SSO Version)
-# Description: Use this recipe to set up an existing Agent on a new machine when using
-# SSO authentication. This recipe uses the Alation Agent API to download, install, and 
-# configure an Alation Agent and connect the Agent to Alation, then reinstall its connectors.
+# Name: Prepare Agent System (SSO Version)
+# Description: Phase 1 of partial rebuild solution. Installs Alation Agent packages
+# and dependencies but leaves services dormant. Use activate-sso.py to complete
+# the activation during agent setup.
 #
 # Author: Alation
 # Alation Catalog Version: 2023.3.2
@@ -54,20 +54,24 @@ import toml           # TOML configuration file parsing
 # IMPORTANT: Update these values with your Alation instance details before running
 
 # Your Alation Cloud Service instance URL (e.g., https://yourcompany.alationcloud.com)
-BASE_URL = "https://your-instance.mtse.alationcloud.com"
+BASE_URL = "<AlationInstanceURL>"
 
 # SSO Authentication Tokens (generate these through the Alation UI)
 # These tokens must be obtained manually from your Alation instance:
 # 1. Log into your Alation instance through your browser
 # 2. Navigate to your user profile settings
 # 3. Generate a Refresh Token and API Access Token
-REFRESH_TOKEN = "your-refresh-token"
-API_ACCESS_TOKEN = "your-api-access-token"
+REFRESH_TOKEN = "<YourRefreshToken>"
+API_ACCESS_TOKEN = "<YourAPIAccessToken>"
 
-# Agent identifier for the agent you want to reinstall
-# If you don't know your agent identifier, you can retrieve a list of
-# agents in your Alation instance via GET https://<AlationInstanceURL>/integration/v1/agent/
-agent_id = 1
+# NOTE: agent_id is NOT required for dormant installation
+# The agent_id is only needed during activation (activate-sso.py)
+# since dormant installation doesn't connect to or configure specific agents
+
+# Authentication Service installation (optional)
+# Set to True if your data sources require advanced authentication methods
+# Set to False for basic installations or if not needed
+INSTALL_AUTH_SERVICE = True
 
 
 # ==================================================================================
@@ -92,15 +96,15 @@ class ColoredFormatter(logging.Formatter):
     reset = "\x1b[0m"
     
     # Log message format template
-    format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
+    log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
     
     # Color mapping for different log levels
     FORMATS = {
-        logging.DEBUG: blue + format + reset,
-        logging.INFO: blue + format + reset,
-        logging.WARNING: yellow + format + reset,
-        logging.ERROR: red + format + reset,
-        logging.CRITICAL: bold_red + format + reset
+        logging.DEBUG: blue + log_format + reset,
+        logging.INFO: blue + log_format + reset,
+        logging.WARNING: yellow + log_format + reset,
+        logging.ERROR: red + log_format + reset,
+        logging.CRITICAL: bold_red + log_format + reset
     }
 
     def format(self, record):
@@ -201,12 +205,16 @@ def linux_flavor_pkg_manager():
 
 
 # ==================================================================================
-# MAIN EXECUTION LOGIC
+# MAIN EXECUTION LOGIC - DORMANT INSTALLATION PHASE
 # ==================================================================================
 
 # Use a persistent session for all HTTP requests to maintain authentication
 with requests.Session() as session:
     try:
+        logger.info("### STARTING DORMANT AGENT INSTALLATION (WARM STANDBY PREPARATION) ###")
+        logger.info("### This script installs packages but leaves services dormant ###")
+        logger.info("### Use activate-agent-sso.py to complete activation during failover ###")
+        
         # ======================================================================
         # PHASE 1: SSO AUTHENTICATION SETUP
         # ======================================================================
@@ -299,157 +307,118 @@ with requests.Session() as session:
         logger.info("### Done performing post-install checks ###")
 
         # ======================================================================
-        # PHASE 5: AGENT CONFIGURATION
+        # PHASE 5: AUTHENTICATION SERVICE INSTALLATION (OPTIONAL)
         # ======================================================================
         
-        logger.info("### Retrieving connectivity endpoint... ###")
-        # Get the agent connectivity endpoint from Alation
-        # This endpoint will be used to configure the agent's proxy settings
-        agent_dns = session.get(
-            f"{BASE_URL}/integration/v1/agent/endpoint/",
-        ).json()["endpoint"]
-        logger.info("### Connectivity endpoint retrieved is {} ###".format(agent_dns))
-
-        logger.info("### Updating agent configuration... ###")
-        # Read the current Hydra configuration file
-        raw = subprocess.check_output(["sudo", "cat", "/etc/hydra/hydra.toml"], encoding="utf8")
-        config = toml.loads(raw)
-        
-        # Update the proxy address with the connectivity endpoint
-        config['proxy'] = {'address': agent_dns}
-        
-        # Write the updated configuration to a temporary file, then move it into place
-        # This ensures atomic updates and prevents corruption of the config file
-        with open('hydra_updated.toml', 'w') as f:
-            toml.dump(config, f)
-        subprocess.run(["sudo", "mv", "hydra_updated.toml", "/etc/hydra/hydra.toml"])
-        logger.info("### Done updating agent configuration ###")
-
-        # ======================================================================
-        # PHASE 6: CERTIFICATE MANAGEMENT
-        # ======================================================================
-        
-        logger.info("### Signing & installing a certificate for the Alation Agent... ###")
-        # Generate a Certificate Signing Request (CSR) using Kratos
-        # This CSR will be sent to Alation for signing to establish secure communication
-        csr = subprocess.check_output(['sudo', 'kratos', 'certs', 'gen'], encoding="utf8").strip()
-        
-        # Send CSR to Alation for signing and receive the signed certificate chain
-        agent_certificate = session.post(
-            f"{BASE_URL}/integration/v1/agent/{agent_id}/sign_certificate/",
-            json={"CSR": csr}
-        ).json()["chain"]
-        
-        # Install the signed certificate using Kratos
-        subprocess.run(["sudo", "kratos", "certs", "install"], 
-                      input=agent_certificate, universal_newlines=True)
-        logger.info("### Done signing & installing a certificate for the Alation Agent ###")
-
-        # ======================================================================
-        # PHASE 7: AUTHENTICATION SERVICE INSTALLATION
-        # ======================================================================
-        
-        logger.info("### Retrieving the latest version of the Authentication Service and its checksum... ###")
-        # Get information about the latest Authentication Service addon
-        # This service is required for proper agent authentication with various data sources
-        available_auth_service_versions = session.get(
-            f"{BASE_URL}/integration/v1/agent/addons/auth/"
-        ).json()
-        latest_auth_service_version = available_auth_service_versions["latest"]["version"]
-        latest_auth_service_checksum = available_auth_service_versions["latest"]["checksum"]
-        logger.info("### Done retrieving the latest version of the Authentication Service and its checksum ###")
-
-        logger.info(f"### Downloading latest Authentication Service version {latest_auth_service_version}... ###")
-        # Use a temporary file to securely download the Authentication Service
-        with tempfile.NamedTemporaryFile(mode="w+b", prefix="authentication-service-", suffix=".tar.gz") as tmp_file:
-            # Download the latest Authentication Service addon
-            res = session.get(
-                f"{BASE_URL}/integration/v1/agent/addons/auth/latest/",
-            )
-            res.raise_for_status()  # Raise exception for HTTP errors
-            tmp_file.write(res.content)
-            tmp_file.seek(0)  # Reset file pointer for reading
-            logger.info("### Done downloading latest Authentication Service ###")
-
-            logger.info("### Validating integrity of downloaded Authentication Service... ###")
-            # Compute SHA256 checksum for security validation
-            sha256_checksum = hashlib.sha256(tmp_file.read()).hexdigest()
-            
-            # Verify the checksum matches the expected value from Alation
-            if latest_auth_service_checksum != sha256_checksum:
-                raise Exception("The SHA256 checksum of the downloaded Authentication Service is "
-                                "not equal to the precomputed checksum from Alation")
-            logger.info("### Done validating integrity of downloaded Authentication Service ###")
-
-            logger.info(f"### Installing the latest Authentication Service version {latest_auth_service_version}... ###")
-            # Install the Authentication Service addon using Kratos
-            subprocess.run(["sudo", "kratos", "addons", "install", "auth", tmp_file.name])
-            logger.info("### Done installing latest Authentication Service ###")
-
-        # ======================================================================
-        # PHASE 8: AGENT STARTUP AND CONNECTIVITY
-        # ======================================================================
-        
-        logger.info("### Restarting Agent... ###")
-        # Restart the Hydra service to apply all configuration changes
-        subprocess.run(["sudo", "systemctl", "restart", "hydra"])
-        logger.info("### Done restarting Agent ###")
-
-        logger.info("### Waiting for the Agent to connect... ###")
-        # Poll the agent status until it shows as connected
-        while True:
-            # Check the agent connection status via API
-            is_connected = session.get(
-                f"{BASE_URL}/integration/v1/agent/{agent_id}/",
-            ).json()["is_connected"]
-            
-            if not is_connected:
-                logger.warning("### Agent is not connected yet... ###")
-                logger.warning("### Checking again in 5 seconds ###")
-                time.sleep(5)
-                continue
-            else:
-                logger.info("### The Agent is now connected ###")
-                break
-
-        # ======================================================================
-        # PHASE 9: AGENT RESYNCHRONIZATION
-        # ======================================================================
-        
-        logger.info("### Resyncing Agent... ###")
-        # Initiate agent resync to reinstall connectors and update metadata
-        res = session.post(
-            f"{BASE_URL}/integration/v1/agent/{agent_id}/resync/",
-            headers={"TOKEN": access_token},
-        )
-        job_id = res.json()["job_id"]
-        
-        logger.info("### Waiting on Agent resync to complete... ###")
-        # Monitor the resync job until completion
-        while True:
-            # Check the status of the resync job
-            res = requests.get(
-                f"{BASE_URL}/api/v1/bulk_metadata/job/",
-                params={"id": job_id},
-                headers={"TOKEN": access_token}
+        if INSTALL_AUTH_SERVICE:
+            logger.info("### Installing Authentication Service (optional component)... ###")
+            logger.info("### Retrieving the latest version of the Authentication Service and its checksum... ###")
+            # Get information about the latest Authentication Service addon
+            # This service is required for proper agent authentication with various data sources
+            available_auth_service_versions = session.get(
+                f"{BASE_URL}/integration/v1/agent/addons/auth/"
             ).json()
-            status = res["status"]
-            
-            if status == "running":
-                logger.info("Agent resync is not complete. Sleeping for 5 seconds...")
-                time.sleep(5)
-                continue
-            elif status != "successful":
-                raise Exception("Agent resync job failed {}".format(json.dumps(res)))
+            latest_auth_service_version = available_auth_service_versions["latest"]["version"]
+            latest_auth_service_checksum = available_auth_service_versions["latest"]["checksum"]
+            logger.info("### Done retrieving the latest version of the Authentication Service and its checksum ###")
+
+            logger.info(f"### Downloading latest Authentication Service version {latest_auth_service_version}... ###")
+            # Use a temporary file to securely download the Authentication Service
+            with tempfile.NamedTemporaryFile(mode="w+b", prefix="authentication-service-", suffix=".tar.gz") as tmp_file:
+                # Download the latest Authentication Service addon
+                res = session.get(
+                    f"{BASE_URL}/integration/v1/agent/addons/auth/latest/",
+                )
+                res.raise_for_status()  # Raise exception for HTTP errors
+                tmp_file.write(res.content)
+                tmp_file.seek(0)  # Reset file pointer for reading
+                logger.info("### Done downloading latest Authentication Service ###")
+
+                logger.info("### Validating integrity of downloaded Authentication Service... ###")
+                # Compute SHA256 checksum for security validation
+                sha256_checksum = hashlib.sha256(tmp_file.read()).hexdigest()
+                
+                # Verify the checksum matches the expected value from Alation
+                if latest_auth_service_checksum != sha256_checksum:
+                    raise Exception("The SHA256 checksum of the downloaded Authentication Service is "
+                                    "not equal to the precomputed checksum from Alation")
+                logger.info("### Done validating integrity of downloaded Authentication Service ###")
+
+                logger.info(f"### Installing the latest Authentication Service version {latest_auth_service_version}... ###")
+                # Install the Authentication Service addon using Kratos
+                subprocess.run(["sudo", "kratos", "addons", "install", "auth", tmp_file.name])
+                logger.info("### Done installing latest Authentication Service ###")
+        else:
+            logger.info("### Skipping Authentication Service installation (disabled in configuration) ###")
+
+        # ======================================================================
+        # PHASE 6: ENSURE SERVICES REMAIN DORMANT
+        # ======================================================================
+        
+        logger.info("### Ensuring agent services remain stopped (dormant state)... ###")
+        
+        # Check if Hydra service is running and stop it if needed
+        try:
+            result = subprocess.run(["sudo", "systemctl", "is-active", "hydra"], 
+                                  capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip() == "active":
+                logger.info("### Hydra service is running - stopping it to maintain dormant state ###")
+                subprocess.run(["sudo", "hydra", "stop"], stdout=subprocess.DEVNULL)
+                logger.info("### Hydra service stopped successfully ###")
             else:
-                logger.info("### Agent resync completed successfully ###")
-                break
+                logger.info("### Hydra service is already stopped (dormant state confirmed) ###")
+        except Exception as e:
+            logger.warning(f"### Could not check/stop Hydra service: {e} ###")
+            logger.info("### Attempting to stop Hydra service anyway ###")
+            subprocess.run(["sudo", "hydra", "stop"], stdout=subprocess.DEVNULL)
+        
+        # Final verification of dormant state
+        logger.info("### Verifying final dormant state... ###")
+        try:
+            result = subprocess.run(["sudo", "systemctl", "status", "hydra"], 
+                                  capture_output=True, text=True)
+            if "inactive" in result.stdout or "failed" in result.stdout:
+                logger.info("### ✅ Hydra service confirmed in dormant state ###")
+            else:
+                logger.warning("### ⚠️  Hydra service may still be active - check manually ###")
+        except Exception:
+            logger.info("### Service status check completed ###")
+            
+        logger.info("### Done ensuring services remain dormant ###")
+
+        # ======================================================================
+        # DORMANT INSTALLATION COMPLETE
+        # ======================================================================
+        
+        logger.info("### DORMANT AGENT INSTALLATION COMPLETE ###")
+        logger.info("### Agent packages are installed but services remain dormant ###")
+        logger.info("### Key phases completed: ###")
+        logger.info("###   ✅ SSO authentication setup ###")
+        logger.info("###   ✅ Agent package download and validation ###") 
+        logger.info("###   ✅ Agent package installation ###")
+        logger.info("###   ✅ Authentication Service installation (if enabled) ###")
+        logger.info("###   ✅ Post-installation validation ###")
+        logger.info("### ###")
+        logger.info("### Phases skipped (for activation): ###")
+        logger.info("###   ⏭️  Connectivity configuration ###")
+        logger.info("###   ⏭️  Certificate generation ###")
+        logger.info("###   ⏭️  Service startup ###")
+        logger.info("###   ⏭️  Agent registration ###")
+        logger.info("###   ⏭️  Connector synchronization ###")
+        logger.info("### ###")
+        logger.info("### To activate this standby agent during failover: ###")
+        logger.info("###   1. Ensure primary agent is completely offline ###")
+        logger.info("###   2. Run: python3 activate-agent-sso.py ###")
+        logger.info("###   3. Expected activation time: 3-5 minutes ###")
+        logger.info("### ###")
+        logger.info("### Standby agent is ready for emergency activation! ###")
+        
     except Exception:
         # ======================================================================
         # ERROR HANDLING AND CLEANUP
         # ======================================================================
         
-        logger.exception("### Failed to set up Agent ###")
+        logger.exception("### Failed to install dormant agent ###")
         logger.warning("### Removing any installed packages... ###")
         
         # Clean up any packages that may have been installed before the failure
@@ -465,7 +434,7 @@ with requests.Session() as session:
         # SUCCESS COMPLETION
         # ======================================================================
         
-        logger.info("### Agent setup is complete ###")
+        logger.info("### Dormant agent installation completed successfully ###")
         
     finally:
         # ======================================================================

@@ -50,17 +50,22 @@ import toml           # TOML configuration file parsing
 # IMPORTANT: Update these values with your Alation instance details before running
 
 # Your Alation Cloud Service instance URL (e.g., https://yourcompany.alationcloud.com)
-BASE_URL = "https://your-instance.alationcloud.com"
+BASE_URL = "<AlationInstanceURL>"
 
 # Server Admin credentials for username/password authentication
 # These will be used to generate temporary API tokens
-USERNAME = "your-username"
-PASSWORD = "your-password"
+USERNAME = "<AlationServerAdminUserName>"
+PASSWORD = "<AlationServerAdminPassword>"
 
 # Agent identifier for the agent you want to reinstall
 # If you don't know your agent identifier, you can retrieve a list of
 # agents in your Alation instance via GET https://<AlationInstanceURL>/integration/v1/agent/
 agent_id = 1
+
+# Authentication Service installation (optional)
+# Set to True if your data sources require advanced authentication methods
+# Set to False for basic installations or if not needed
+INSTALL_AUTH_SERVICE = True
 
 
 # ==================================================================================
@@ -85,15 +90,15 @@ class ColoredFormatter(logging.Formatter):
     reset = "\x1b[0m"
     
     # Log message format template
-    format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
+    log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
     
     # Color mapping for different log levels
     FORMATS = {
-        logging.DEBUG: blue + format + reset,
-        logging.INFO: blue + format + reset,
-        logging.WARNING: yellow + format + reset,
-        logging.ERROR: red + format + reset,
-        logging.CRITICAL: bold_red + format + reset
+        logging.DEBUG: blue + log_format + reset,
+        logging.INFO: blue + log_format + reset,
+        logging.WARNING: yellow + log_format + reset,
+        logging.ERROR: red + log_format + reset,
+        logging.CRITICAL: bold_red + log_format + reset
     }
 
     def format(self, record):
@@ -370,45 +375,49 @@ with requests.Session() as session:
         logger.info("### Done signing & installing a certificate for the Alation Agent ###")
 
         # ======================================================================
-        # PHASE 7: AUTHENTICATION SERVICE INSTALLATION
+        # PHASE 7: AUTHENTICATION SERVICE INSTALLATION (OPTIONAL)
         # ======================================================================
         
-        logger.info("### Retrieving the latest version of the Authentication Service and its checksum... ###")
-        # Get information about the latest Authentication Service addon
-        # This service is required for proper agent authentication with various data sources
-        available_auth_service_versions = session.get(
-            f"{BASE_URL}/integration/v1/agent/addons/auth/"
-        ).json()
-        latest_auth_service_version = available_auth_service_versions["latest"]["version"]
-        latest_auth_service_checksum = available_auth_service_versions["latest"]["checksum"]
-        logger.info("### Done retrieving the latest version of the Authentication Service and its checksum ###")
+        if INSTALL_AUTH_SERVICE:
+            logger.info("### Installing Authentication Service (optional component)... ###")
+            logger.info("### Retrieving the latest version of the Authentication Service and its checksum... ###")
+            # Get information about the latest Authentication Service addon
+            # This service is required for proper agent authentication with various data sources
+            available_auth_service_versions = session.get(
+                f"{BASE_URL}/integration/v1/agent/addons/auth/"
+            ).json()
+            latest_auth_service_version = available_auth_service_versions["latest"]["version"]
+            latest_auth_service_checksum = available_auth_service_versions["latest"]["checksum"]
+            logger.info("### Done retrieving the latest version of the Authentication Service and its checksum ###")
 
-        logger.info(f"### Downloading latest Authentication Service version {latest_auth_service_version}... ###")
-        # Use a temporary file to securely download the Authentication Service
-        with tempfile.NamedTemporaryFile(mode="w+b", prefix="authentication-service-", suffix=".tar.gz") as tmp_file:
-            # Download the latest Authentication Service addon
-            res = session.get(
-                f"{BASE_URL}/integration/v1/agent/addons/auth/latest/",
-            )
-            res.raise_for_status()  # Raise exception for HTTP errors
-            tmp_file.write(res.content)
-            tmp_file.seek(0)  # Reset file pointer for reading
-            logger.info("### Done downloading latest Authentication Service ###")
+            logger.info(f"### Downloading latest Authentication Service version {latest_auth_service_version}... ###")
+            # Use a temporary file to securely download the Authentication Service
+            with tempfile.NamedTemporaryFile(mode="w+b", prefix="authentication-service-", suffix=".tar.gz") as tmp_file:
+                # Download the latest Authentication Service addon
+                res = session.get(
+                    f"{BASE_URL}/integration/v1/agent/addons/auth/latest/",
+                )
+                res.raise_for_status()  # Raise exception for HTTP errors
+                tmp_file.write(res.content)
+                tmp_file.seek(0)  # Reset file pointer for reading
+                logger.info("### Done downloading latest Authentication Service ###")
 
-            logger.info("### Validating integrity of downloaded Authentication Service... ###")
-            # Compute SHA256 checksum for security validation
-            sha256_checksum = hashlib.sha256(tmp_file.read()).hexdigest()
-            
-            # Verify the checksum matches the expected value from Alation
-            if latest_auth_service_checksum != sha256_checksum:
-                raise Exception("The SHA256 checksum of the downloaded Authentication Service is "
-                                "not equal to the precomputed checksum from Alation")
-            logger.info("### Done validating integrity of downloaded Authentication Service ###")
+                logger.info("### Validating integrity of downloaded Authentication Service... ###")
+                # Compute SHA256 checksum for security validation
+                sha256_checksum = hashlib.sha256(tmp_file.read()).hexdigest()
+                
+                # Verify the checksum matches the expected value from Alation
+                if latest_auth_service_checksum != sha256_checksum:
+                    raise Exception("The SHA256 checksum of the downloaded Authentication Service is "
+                                    "not equal to the precomputed checksum from Alation")
+                logger.info("### Done validating integrity of downloaded Authentication Service ###")
 
-            logger.info(f"### Installing the latest Authentication Service version {latest_auth_service_version}... ###")
-            # Install the Authentication Service addon using Kratos
-            subprocess.run(["sudo", "kratos", "addons", "install", "auth", tmp_file.name])
-            logger.info("### Done installing latest Authentication Service ###")
+                logger.info(f"### Installing the latest Authentication Service version {latest_auth_service_version}... ###")
+                # Install the Authentication Service addon using Kratos
+                subprocess.run(["sudo", "kratos", "addons", "install", "auth", tmp_file.name])
+                logger.info("### Done installing latest Authentication Service ###")
+        else:
+            logger.info("### Skipping Authentication Service installation (disabled in configuration) ###")
 
         # ======================================================================
         # PHASE 8: AGENT STARTUP AND CONNECTIVITY
